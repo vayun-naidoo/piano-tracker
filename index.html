@@ -51,14 +51,22 @@
         let activeBar = null;
 
         async function loadData() {
-            try {
-                const res = await fetch(SCRIPT_URL);
-                state.history = await res.json();
-                document.getElementById('sync-status').innerText = "Cloud Sync: Synced ✅";
-                processHistory();
-            } catch (e) { document.getElementById('sync-status').innerText = "Cloud Sync: Offline ❌"; }
-            updateUI();
-        }
+    try {
+        // We use 'cors' mode but Google requires the redirect to be followed
+        const response = await fetch(SCRIPT_URL, {
+            method: 'GET',
+            redirect: 'follow' 
+        });
+        
+        state.history = await response.json();
+        document.getElementById('sync-status').innerText = "Cloud Sync: Synced ✅";
+        processHistory();
+        updateUI();
+    } catch (e) { 
+        console.error("Load failed:", e);
+        document.getElementById('sync-status').innerText = "Cloud Sync: Load Error ❌"; 
+    }
+}
 
         function processHistory() {
             // Rebuilds pieces and latest ratings from sheet rows
@@ -76,15 +84,31 @@
         }
 
         async function saveSession() {
-            const piece = state.pieces[state.activePieceId];
-            const updates = Object.keys(piece.currentRatings).map(bar => ({
-                piece: piece.name, bar: bar, rating: piece.currentRatings[bar], note: piece.currentNotes[bar] || ""
-            }));
-            
-            document.getElementById('sync-status').innerText = "Cloud Sync: Saving...";
-            await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ updates }) });
-            location.reload(); // Refresh to pull latest sheet state
-        }
+    const piece = state.pieces[state.activePieceId];
+    const updates = Object.keys(piece.currentRatings).map(bar => ({
+        piece: piece.name, bar: bar, rating: piece.currentRatings[bar], note: piece.currentNotes[bar] || ""
+    }));
+    
+    document.getElementById('sync-status').innerText = "Cloud Sync: Saving...";
+
+    try {
+        await fetch(SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors', // This is the "magic" flag for Google Apps Script POSTs
+            cache: 'no-cache',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ updates })
+        });
+        
+        // Since 'no-cors' prevents us from reading the response, 
+        // we assume success if no error is thrown.
+        alert("Session Synced!");
+        location.reload(); 
+    } catch (e) { 
+        alert("Sync failed. Check Console."); 
+        console.error(e);
+    }
+}
 
         function renderGrid() {
             const grid = document.getElementById('bar-grid');
