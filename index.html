@@ -69,19 +69,33 @@
 }
 
         function processHistory() {
-            // Rebuilds pieces and latest ratings from sheet rows
-            state.history.forEach(row => {
-                const id = row.piece.replace(/\s/g, '');
-                if (!state.pieces[id]) {
-                    state.pieces[id] = { name: row.piece, totalBars: 100, currentRatings: {}, currentNotes: {} };
-                }
-                state.pieces[id].currentRatings[row.bar] = row.rating;
-                if (parseInt(row.bar) > state.pieces[id].totalBars) state.pieces[id].totalBars = parseInt(row.bar);
-            });
-            if (!state.activePieceId && Object.keys(state.pieces).length > 0) {
-                state.activePieceId = Object.keys(state.pieces)[0];
-            }
+    state.history.forEach(row => {
+        const id = row.piece.replace(/\s/g, ''); // Unique ID based on name
+        
+        if (!state.pieces[id]) {
+            state.pieces[id] = { 
+                name: row.piece, 
+                totalBars: 0, // Start at 0, grow based on data
+                currentRatings: {}, 
+                currentNotes: {} 
+            };
         }
+
+        // Set the rating
+        state.pieces[id].currentRatings[row.bar] = row.rating;
+
+        // DYNAMIC SIZING: If this bar is higher than current total, update total
+        const barNum = parseInt(row.bar);
+        if (barNum > state.pieces[id].totalBars) {
+            state.pieces[id].totalBars = barNum;
+        }
+    });
+
+    // Set the first piece as active if none selected
+    if (!state.activePieceId && Object.keys(state.pieces).length > 0) {
+        state.activePieceId = Object.keys(state.pieces)[0];
+    }
+}
 
         async function saveSession() {
     const piece = state.pieces[state.activePieceId];
