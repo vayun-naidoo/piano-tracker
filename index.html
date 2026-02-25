@@ -97,31 +97,29 @@
     }
 }
 
-        async function saveSession() {
+async function saveSession() {
     const piece = state.pieces[state.activePieceId];
     const updates = Object.keys(piece.currentRatings).map(bar => ({
-        piece: piece.name, bar: bar, rating: piece.currentRatings[bar], note: piece.currentNotes[bar] || ""
+        piece: piece.name,
+        bar: parseInt(bar),
+        rating: piece.currentRatings[bar],
+        note: piece.currentNotes[bar] || "" // This was likely the missing link
     }));
-    
-    document.getElementById('sync-status').innerText = "Cloud Sync: Saving...";
+
+    if (updates.length === 0) return alert("No new ratings to sync!");
 
     try {
         await fetch(SCRIPT_URL, {
             method: 'POST',
-            mode: 'no-cors', // This is the "magic" flag for Google Apps Script POSTs
-            cache: 'no-cache',
-            headers: { 'Content-Type': 'application/json' },
+            mode: 'no-cors',
             body: JSON.stringify({ updates })
         });
         
-        // Since 'no-cors' prevents us from reading the response, 
-        // we assume success if no error is thrown.
+        // CLEAR notes after successful sync so they don't haunt the next session
+        piece.currentNotes = {}; 
         alert("Session Synced!");
         location.reload(); 
-    } catch (e) { 
-        alert("Sync failed. Check Console."); 
-        console.error(e);
-    }
+    } catch (e) { alert("Sync failed."); }
 }
 
         function renderGrid() {
@@ -138,11 +136,27 @@
             }
         }
 
-        function setRating(r) {
-            state.pieces[state.activePieceId].currentRatings[activeBar] = r;
-            state.pieces[state.activePieceId].currentNotes[activeBar] = document.getElementById('bar-note').value;
-            renderGrid();
-        }
+        // Ensure notes are stored per bar
+function setRating(r) {
+    const piece = state.pieces[state.activePieceId];
+    const noteContent = document.getElementById('bar-note').value;
+    
+    piece.currentRatings[activeBar] = r;
+    piece.currentNotes[activeBar] = noteContent; // Map note to specific bar
+    
+    renderGrid();
+}
+
+// Update the modal opener to show the correct note for THAT bar
+function openBarModal(barNum) {
+    activeBar = barNum;
+    const piece = state.pieces[state.activePieceId];
+    document.getElementById('modal-title').innerText = `Bar #${barNum}`;
+    
+    // Fill the textarea with the existing note for this bar, or blank it
+    document.getElementById('bar-note').value = piece.currentNotes[barNum] || "";
+    document.getElementById('modal').style.display = 'block';
+}
 
         function closeModal() { document.getElementById('modal').style.display = 'none'; }
         function switchPiece() { state.activePieceId = document.getElementById('piece-selector').value; renderGrid(); }
