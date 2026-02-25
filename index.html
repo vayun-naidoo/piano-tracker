@@ -50,41 +50,63 @@
         let state = { activePieceId: null, pieces: {}, history: [] };
         let activeBar = null;
 
-        // 1. DATA LOADING
-        async function loadData() {
-            try {
-                const res = await fetch(SCRIPT_URL, { method: 'GET', redirect: 'follow' });
-                state.history = await res.json();
-                document.getElementById('sync-status').innerText = "Cloud Sync: Synced ✅";
-                processHistory();
-                updateUI();
-            } catch (e) { document.getElementById('sync-status').innerText = "Cloud Sync: Offline ❌"; }
-        }
+ // 1. DATA LOADING
+async function loadData() {
+    try {
+        const res = await fetch(SCRIPT_URL, { method: 'GET', redirect: 'follow' });
+        const payload = await res.json();
+        
+        // Unpack the new dual-payload
+        state.history = payload.history || [];
+        state.config = payload.config || {};
+        
+        document.getElementById('sync-status').innerText = "Cloud Sync: Synced ✅";
+        processHistory();
+        updateUI();
+    } catch (e) { 
+        document.getElementById('sync-status').innerText = "Cloud Sync: Offline ❌"; 
+        console.error("Load Error:", e);
+    }
+}
 
-        function processHistory() {
-            state.pieces = {}; 
-            state.history.forEach(row => {
-                const id = row.piece.replace(/\s/g, '');
-                if (!state.pieces[id]) {
-                    // Added 'unsavedChanges' tracking queue
-                    state.pieces[id] = { name: row.piece, totalBars: 100, currentRatings: {}, currentNotes: {}, unsavedChanges: {} };
-                }
-                
-                if (parseInt(row.bar) === 0) {
-                    state.pieces[id].totalBars = parseInt(row.rating);
-                } else {
-                    state.pieces[id].currentRatings[row.bar] = parseInt(row.rating);
-                    // BUG FIX: Actually load the notes from the database into memory!
-                    if (row.note && row.note.trim() !== "") {
-                        state.pieces[id].currentNotes[row.bar] = row.note;
-                    }
-                }
-            });
-            
-            if (!state.activePieceId && Object.keys(state.pieces).length > 0) {
-                state.activePieceId = Object.keys(state.pieces)[0];
+function processHistory() {
+    state.pieces = {}; 
+    
+    // First, build the pieces exactly as you sized them in the PieceConfig tab
+    Object.keys(state.config).forEach(pieceName => {
+        const id = pieceName.replace(/\s/g, '');
+        state.pieces[id] = { 
+            name: pieceName, 
+            totalBars: parseInt(state.config[pieceName]), 
+            currentRatings: {}, 
+            currentNotes: {}, 
+            unsavedChanges: {} 
+        };
+    });
+
+    // Next, overlay your practice history onto those pieces
+    state.history.forEach(row => {
+        if (!row.piece) return;
+        const id = row.piece.replace(/\s/g, '');
+        
+        // Fallback just in case a piece is in the log but not in the Config tab yet
+        if (!state.pieces[id]) {
+            state.pieces[id] = { name: row.piece, totalBars: 100, currentRatings: {}, currentNotes: {}, unsavedChanges: {} };
+        }
+        
+        // Ignore any old "Bar 0" metadata rows you might still have in the log
+        if (parseInt(row.bar) > 0) { 
+            state.pieces[id].currentRatings[row.bar] = parseInt(row.rating);
+            if (row.note && row.note.trim() !== "") {
+                state.pieces[id].currentNotes[row.bar] = row.note;
             }
         }
+    });
+    
+    if (!state.activePieceId && Object.keys(state.pieces).length > 0) {
+        state.activePieceId = Object.keys(state.pieces)[0];
+    }
+}
 
         // 2. UI & MODAL INTERACTIONS
         function renderGrid() {
