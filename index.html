@@ -1,126 +1,198 @@
-<script>
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyhvy7fzHq6bh3zJ0nOkhihQxB18QHtjrjq06U1VIJzFaFRcyxbDqd4txSo_hu5UkXl/exec";
-    let state = { activePieceId: null, pieces: {}, history: [] };
-    let activeBar = null;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piano Tracker v5.0 (Note Fix)</title>
+    <style>
+        :root { --bg: #f4f4f9; --card: #ffffff; --primary: #6366f1; --rating-1: #22c55e; --rating-4: #ef4444; }
+        body { font-family: sans-serif; background: var(--bg); padding: 20px; max-width: 800px; margin: 0 auto; }
+        .panel { background: var(--card); padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        #bar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 8px; }
+        .bar-box { background: #e5e7eb; aspect-ratio: 1; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; }
+        .r-1 { background: var(--rating-1); color: white; }
+        .r-2 { background: #eab308; }
+        .r-3 { background: #f97316; }
+        .r-4 { background: var(--rating-4); color: white; }
+        .btn { padding: 10px 20px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; color: white; background: var(--primary); }
+        #modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.5); z-index: 10; width: 90%; max-width: 400px; }
+        .note-indicator { font-size: 10px; margin-top: 2px; }
+    </style>
+</head>
+<body>
 
-    // --- 1. CLOUD SYNC LOGIC ---
-    async function loadData() {
-        try {
-            const res = await fetch(SCRIPT_URL, { method: 'GET', redirect: 'follow' });
-            state.history = await res.json();
-            document.getElementById('sync-status').innerText = "Cloud Sync: Synced ✅";
-            processHistory();
-            updateUI();
-        } catch (e) { document.getElementById('sync-status').innerText = "Cloud Sync: Offline ❌"; }
-    }
+    <div class="panel">
+        <h2 id="sync-status">Cloud Sync: Checking...</h2>
+        <select id="piece-selector" onchange="switchPiece()" style="width: 100%; padding: 10px; margin-bottom: 10px;"></select>
+        <button class="btn" onclick="addNewPiece()">+ Add New Piece</button>
+    </div>
 
-    function processHistory() {
-        state.pieces = {}; // Clear to rebuild
-        state.history.forEach(row => {
-            const id = row.piece.replace(/\s/g, '');
-            if (!state.pieces[id]) {
-                state.pieces[id] = { name: row.piece, totalBars: 100, currentRatings: {}, currentNotes: {} };
+    <div id="bar-grid" class="panel"></div>
+
+    <div style="text-align: center;">
+        <button class="btn" style="font-size: 1.2rem;" onclick="saveSession()">💾 Sync Practice to Sheet</button>
+    </div>
+
+    <div id="modal">
+        <h3 id="modal-title">Bar #</h3>
+        <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+            <button onclick="setRating(1)" style="background:var(--rating-1); color:white; flex:1; border:none; padding:10px;">1</button>
+            <button onclick="setRating(2)" style="background:#eab308; flex:1; border:none;">2</button>
+            <button onclick="setRating(3)" style="background:#f97316; flex:1; border:none;">3</button>
+            <button onclick="setRating(4)" style="background:var(--rating-4); color:white; flex:1; border:none;">4</button>
+        </div>
+        <textarea id="bar-note" style="width: 100%; height: 60px;" placeholder="Type note here..."></textarea>
+        <button class="btn" onclick="saveNoteAndClose()" style="width: 100%; margin-top: 10px; background: #6b7280;">Save Note & Close</button>
+    </div>
+
+    <script>
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyhvy7fzHq6bh3zJ0nOkhihQxB18QHtjrjq06U1VIJzFaFRcyxbDqd4txSo_hu5UkXl/exec"; // <--- INSERT YOUR URL
+        let state = { activePieceId: null, pieces: {}, history: [] };
+        let activeBar = null;
+
+        // 1. DATA LOADING
+        async function loadData() {
+            try {
+                const res = await fetch(SCRIPT_URL, { method: 'GET', redirect: 'follow' });
+                state.history = await res.json();
+                document.getElementById('sync-status').innerText = "Cloud Sync: Synced ✅";
+                processHistory();
+                updateUI();
+            } catch (e) { document.getElementById('sync-status').innerText = "Cloud Sync: Offline ❌"; }
+        }
+
+        function processHistory() {
+            state.pieces = {}; 
+            state.history.forEach(row => {
+                const id = row.piece.replace(/\s/g, '');
+                if (!state.pieces[id]) {
+                    // Added 'unsavedChanges' tracking queue
+                    state.pieces[id] = { name: row.piece, totalBars: 100, currentRatings: {}, currentNotes: {}, unsavedChanges: {} };
+                }
+                
+                if (parseInt(row.bar) === 0) {
+                    state.pieces[id].totalBars = parseInt(row.rating);
+                } else {
+                    state.pieces[id].currentRatings[row.bar] = parseInt(row.rating);
+                    // BUG FIX: Actually load the notes from the database into memory!
+                    if (row.note && row.note.trim() !== "") {
+                        state.pieces[id].currentNotes[row.bar] = row.note;
+                    }
+                }
+            });
+            
+            if (!state.activePieceId && Object.keys(state.pieces).length > 0) {
+                state.activePieceId = Object.keys(state.pieces)[0];
             }
-            if (parseInt(row.bar) === 0) {
-                state.pieces[id].totalBars = parseInt(row.rating); 
-            } else {
-                state.pieces[id].currentRatings[row.bar] = row.rating;
+        }
+
+        // 2. UI & MODAL INTERACTIONS
+        function renderGrid() {
+            const grid = document.getElementById('bar-grid');
+            grid.innerHTML = '';
+            const piece = state.pieces[state.activePieceId];
+            if (!piece) return;
+            
+            for (let i = 1; i <= piece.totalBars; i++) {
+                const div = document.createElement('div');
+                div.className = `bar-box r-${piece.currentRatings[i] || ''}`;
+                
+                // Visual indicator so you know which bars have notes
+                const hasNote = piece.currentNotes[i] ? `<span class="note-indicator">📝</span>` : '';
+                div.innerHTML = `${i}${hasNote}`;
+                
+                div.onclick = () => openBarModal(i);
+                grid.appendChild(div);
             }
-        });
-        if (!state.activePieceId && Object.keys(state.pieces).length > 0) {
-            state.activePieceId = Object.keys(state.pieces)[0];
         }
-    }
 
-    async function saveSession() {
-        const piece = state.pieces[state.activePieceId];
-        const updates = Object.keys(piece.currentRatings).map(bar => ({
-            piece: piece.name, 
-            bar: parseInt(bar), 
-            rating: piece.currentRatings[bar], 
-            note: piece.currentNotes[bar] || "" 
-        }));
-        
-        if (updates.length === 0) return alert("Nothing to sync.");
-
-        document.getElementById('sync-status').innerText = "Cloud Sync: Saving...";
-        try {
-            await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ updates }) });
-            piece.currentNotes = {}; // Wipe session notes after successful sync
-            location.reload(); 
-        } catch (e) { alert("Sync failed."); }
-    }
-
-    // --- 2. UI AND MODAL LOGIC ---
-    function renderGrid() {
-        const grid = document.getElementById('bar-grid');
-        grid.innerHTML = '';
-        const piece = state.pieces[state.activePieceId];
-        if (!piece) return;
-        
-        for (let i = 1; i <= piece.totalBars; i++) {
-            const div = document.createElement('div');
-            div.className = `bar-box r-${piece.currentRatings[i] || ''}`;
-            div.innerText = i;
+        function openBarModal(barNum) {
+            activeBar = barNum;
+            const piece = state.pieces[state.activePieceId];
+            document.getElementById('modal-title').innerText = `Bar #${barNum}`;
             
-            // BUG FIX: Route the click through the new openBarModal function
-            div.onclick = () => openBarModal(i);
-            grid.appendChild(div);
+            // BUG FIX: Strictly bind the text box to THIS bar's memory
+            document.getElementById('bar-note').value = piece.currentNotes[barNum] || "";
+            document.getElementById('modal').style.display = 'block';
         }
-    }
 
-    // BUG FIX: This ensures the text box is accurate for the specific bar clicked
-    function openBarModal(barNum) {
-        activeBar = barNum;
-        const piece = state.pieces[state.activePieceId];
-        document.getElementById('modal-title').innerText = `Bar #${barNum}`;
-        
-        // Pull the specific note for this bar, or make the box blank
-        document.getElementById('bar-note').value = piece.currentNotes[barNum] || "";
-        document.getElementById('modal').style.display = 'block';
-    }
-
-    function setRating(r) {
-        const piece = state.pieces[state.activePieceId];
-        
-        // Save the rating and the note exactly to this activeBar
-        piece.currentRatings[activeBar] = r;
-        piece.currentNotes[activeBar] = document.getElementById('bar-note').value;
-        
-        renderGrid();
-        closeModal(); // BUG FIX: Close the modal so it resets for the next click
-    }
-
-    function closeModal() { 
-        document.getElementById('modal').style.display = 'none'; 
-    }
-
-    function switchPiece() { 
-        state.activePieceId = document.getElementById('piece-selector').value; 
-        renderGrid(); 
-    }
-
-    function updateUI() {
-        const sel = document.getElementById('piece-selector');
-        sel.innerHTML = Object.keys(state.pieces).map(id => `<option value="${id}">${state.pieces[id].name}</option>`).join('');
-        renderGrid();
-    }
-
-    async function addNewPiece() {
-        const name = prompt("Piece Name:"); 
-        const bars = prompt("Total Bars:");
-        if (name && bars) {
-            const id = name.replace(/\s/g, '');
-            state.pieces[id] = { name, totalBars: parseInt(bars), currentRatings: {}, currentNotes: {} };
+        function saveNoteAndClose() {
+            if (!activeBar) return;
+            const piece = state.pieces[state.activePieceId];
+            const noteText = document.getElementById('bar-note').value.trim();
             
-            const updates = [{ piece: name, bar: 0, rating: parseInt(bars), note: "METADATA" }];
-            await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ updates }) });
+            // Update memory and flag it for syncing
+            piece.currentNotes[activeBar] = noteText;
+            piece.unsavedChanges[activeBar] = true; 
             
-            state.activePieceId = id; 
-            updateUI();
+            document.getElementById('modal').style.display = 'none';
+            activeBar = null;
+            renderGrid();
         }
-    }
 
-    // Boot up
-    loadData();
-</script>
+        function setRating(r) {
+            const piece = state.pieces[state.activePieceId];
+            piece.currentRatings[activeBar] = r;
+            // The button now saves the rating AND the note, then closes
+            saveNoteAndClose(); 
+        }
+
+        function switchPiece() { 
+            state.activePieceId = document.getElementById('piece-selector').value; 
+            renderGrid(); 
+        }
+
+        function updateUI() {
+            const sel = document.getElementById('piece-selector');
+            sel.innerHTML = Object.keys(state.pieces).map(id => `<option value="${id}">${state.pieces[id].name}</option>`).join('');
+            renderGrid();
+        }
+
+        async function addNewPiece() {
+            const name = prompt("Piece Name:"); 
+            const bars = prompt("Total Bars:");
+            if (name && bars) {
+                const id = name.replace(/\s/g, '');
+                state.pieces[id] = { name, totalBars: parseInt(bars), currentRatings: {}, currentNotes: {}, unsavedChanges: {} };
+                
+                const updates = [{ piece: name, bar: 0, rating: parseInt(bars), note: "METADATA" }];
+                await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ updates }) });
+                
+                state.activePieceId = id; 
+                updateUI();
+            }
+        }
+
+        // 3. CLOUD SYNCING
+        async function saveSession() {
+            let updates = [];
+            
+            // BUG FIX: Only package data for bars that were explicitly changed today
+            Object.values(state.pieces).forEach(piece => {
+                Object.keys(piece.unsavedChanges).forEach(bar => {
+                    updates.push({
+                        piece: piece.name, 
+                        bar: parseInt(bar), 
+                        rating: piece.currentRatings[bar] || 0, 
+                        note: piece.currentNotes[bar] || ""
+                    });
+                });
+            });
+            
+            if (updates.length === 0) return alert("No new changes to sync.");
+
+            document.getElementById('sync-status').innerText = "Cloud Sync: Saving...";
+            try {
+                await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ updates }) });
+                
+                // Clear the update queue after successful sync
+                Object.values(state.pieces).forEach(p => p.unsavedChanges = {}); 
+                alert("Session Synced!");
+                location.reload(); 
+            } catch (e) { alert("Sync failed."); }
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
